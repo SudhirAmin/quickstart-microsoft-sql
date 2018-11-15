@@ -1,0 +1,202 @@
+{
+	"schemaVersion": "0.3",
+	"description": "Deploy WSFC Cluster with SSM Automation",
+	"assumeRole": "{{AutomationAssumeRole}}",
+	"parameters": {
+		
+		"SSMParamName": {
+			"description": "SSM Parameter Name that has Password for the domain admin user. Must be at least 8 characters containing letters, numbers and symbols",
+			"type": "String"
+		},
+		"DomainAdminUser": {
+			"default": "StackAdmin",
+			"description": "User name for the account that will be added as Domain Administrator. This is separate from the default Administrator account",
+			"type": "String"
+		},
+		"DomainDNSName": {
+			"default": "example.com",
+			"description": "Fully qualified domain name (FQDN) of the forest root domain e.g. example.com",
+			"type": "String"
+		},
+		"DomainNetBIOSName": {
+			"default": "example",
+			"description": "NetBIOS name of the domain (up to 15 characters) for users of earlier versions of Windows e.g. EXAMPLE",
+			"type": "String"
+		},
+        "WSFCNode1NetBIOSName": {
+            "default": "WSFCNode1",
+            "description": "NetBIOS name of the first WSFC Node (up to 15 characters)",
+            "type": "String"
+        },
+        "WSFCNode2NetBIOSName": {
+            "default": "WSFCNode2",
+            "type": "String"
+        },
+		"StackName": {
+			"default": "",
+			"description": "Stack Name Input for cfn resource signal",
+			"type": "String"
+		},
+		"AutomationAssumeRole": {
+			"default": "",
+			"description": "(Optional) The ARN of the role that allows Automation to perform the actions on your behalf.",
+			"type": "String"
+		}
+	},
+	"mainSteps": [
+		{
+			"name": "WSFCNodeInstanceIds",
+			"action": "aws:executeAwsApi",
+			"nextStep": "InstallDscModules",
+			"inputs": {
+				"Service": "ec2",
+				"Api": "DescribeInstances",
+				"Filters": [
+					{
+						"Name": "tag:Name",
+						"Values": [
+							"{{WSFCNode1NetBIOSName}}",
+							"{{WSFCNode2NetBIOSName}}"
+						]
+					},
+					{
+						"Name": "instance-state-name",
+						"Values": [
+							"running"
+						]
+					}
+				]
+			},
+			"outputs": [
+				{
+					"Name": "InstanceIds",
+					"Selector": "$.Reservations..Instances..InstanceId",
+					"Type": "StringList"
+				}
+			]
+		},
+		{
+			"name": "InstallDscModules",
+			"action": "aws:runCommand",
+			"nextStep": "LCMConfig",
+			"inputs": {
+				"DocumentName": "AWS-RunRemoteScript",
+				"InstanceIds": [
+					"{{WSFCNodeInstanceIds.InstanceIds}}"
+				],
+				"Parameters": {
+					"sourceType": "S3",
+					"sourceInfo": "{\"path\": \"https://s3.amazonaws.com/powerdsc/InstallDSCModules.ps1\"}",
+					"commandLine": "./InstallDSCModules.ps1"
+				}
+			}
+		},
+		{
+			"name": "LCMConfig",
+			"action": "aws:runCommand",
+			"nextStep": "WSFCNode1InstanceId",
+			"inputs": {
+				"DocumentName": "AWS-RunRemoteScript",
+				"InstanceIds": [
+					"{{WSFCNodeInstanceIds.InstanceIds}}"
+				],
+				"Parameters": {
+					"sourceType": "S3",
+					"sourceInfo": "{\"path\": \"https://s3.amazonaws.com/powerdsc/LCMConfig.ps1\"}",
+					"commandLine": "./LCMConfig.ps1"
+				}
+			}
+		},
+		{
+			"name": "WSFCNode1InstanceId",
+			"action": "aws:executeAwsApi",
+			"nextStep": "ConfigWSFCNode1",
+			"inputs": {
+				"Service": "ec2",
+				"Api": "DescribeInstances",
+				"Filters": [
+					{
+						"Name": "tag:Name",
+						"Values": [
+							"{{WSFCNode1NetBIOSName}}"
+						]
+					},
+					{
+						"Name": "instance-state-name",
+						"Values": [
+							"running"
+						]
+					}
+				]
+			},
+			"outputs": [
+				{
+					"Name": "InstanceId",
+					"Selector": "$.Reservations[0].Instances[0].InstanceId",
+					"Type": "String"
+				}
+			]
+		},
+		{
+			"name": "ConfigWSFCNode1",
+			"action": "aws:runCommand",
+			"nextStep": "WSFCNode2InstanceId",
+			"inputs": {
+				"DocumentName": "AWS-RunRemoteScript",
+				"InstanceIds": [
+					"{{WSFCNode1InstanceId.InstanceId}}"
+				],
+				"Parameters": {
+					"sourceType": "S3",
+					"sourceInfo": "{\"path\": \"https://s3.amazonaws.com/powerdsc/WSFCNode1Config.ps1\"}",
+					"commandLine": "./WSFCNode1Config.ps1 -WSFCNode1NetBIOSName {{WSFCNode1NetBIOSName}} -DomainAdminUser {{DomainAdminUser}} -DomainNetBIOSName {{DomainNetBIOSName}} -DomainDNSName {{DomainDNSName}} -SSMParamName {{SSMParamName}} "
+				}
+			}
+		},
+		{
+			"name": "WSFCNode2InstanceId",
+			"action": "aws:executeAwsApi",
+			"nextStep": "ConfigWSFCNode2",
+			"inputs": {
+				"Service": "ec2",
+				"Api": "DescribeInstances",
+				"Filters": [
+					{
+						"Name": "tag:Name",
+						"Values": [
+							"{{WSFCNode2NetBIOSName}}"
+						]
+					},
+					{
+						"Name": "instance-state-name",
+						"Values": [
+							"running"
+						]
+					}
+				]
+			},
+			"outputs": [
+				{
+					"Name": "InstanceId",
+					"Selector": "$.Reservations[0].Instances[0].InstanceId",
+					"Type": "String"
+				}
+			]
+		},
+		{
+			"name": "ConfigWSFCNode2",
+			"action": "aws:runCommand",
+			"inputs": {
+				"DocumentName": "AWS-RunRemoteScript",
+				"InstanceIds": [
+					"{{WSFCNode2InstanceId.InstanceId}}"
+				],
+				"Parameters": {
+					"sourceType": "S3",
+					"sourceInfo": "{\"path\": \"https://s3.amazonaws.com/powerdsc/WSFCNode2Config.ps1\"}",
+					"commandLine": "./WSFCNode2Config.ps1 -WSFCNode2NetBIOSName {{WSFCNode2NetBIOSName}} -DomainAdminUser {{DomainAdminUser}} -DomainNetBIOSName {{DomainNetBIOSName}} -DomainDNSName {{DomainDNSName}}  -SSMParamName {{SSMParamName}}"
+				}
+			}
+		}
+	]
+}
