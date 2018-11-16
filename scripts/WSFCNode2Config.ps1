@@ -20,8 +20,7 @@ param(
 Configuration WSFCNode2Config {
     param
     (
-        [PSCredential] $Credentials,
-        [PSCredential] $AltCredentials
+        [PSCredential] $Credentials
     )
     
     Import-Module -Name PSDesiredStateConfiguration
@@ -29,12 +28,16 @@ Configuration WSFCNode2Config {
     Import-Module -Name NetworkingDsc
     Import-Module -Name ComputerManagementDsc
     Import-Module -Name xDnsServer
+    Import-Module -Name xFailOverCluster
+
+  
     
     Import-DscResource -Module PSDesiredStateConfiguration
     Import-DscResource -Module NetworkingDsc
     Import-DscResource -Module xActiveDirectory
     Import-DscResource -Module ComputerManagementDsc
     Import-DscResource -Module xDnsServer
+    Import-DscResource -ModuleName xFailOverCluster
     
     Node 'localhost' {
         
@@ -42,14 +45,49 @@ Configuration WSFCNode2Config {
             Name = $WSFCNode2NetBIOSName
             Credential = $Credentials
         }
-        
+        WindowsFeature AddFailoverFeature
+        {
+            Ensure = 'Present'
+            Name   = 'Failover-clustering'
+        }
+
+        WindowsFeature AddRemoteServerAdministrationToolsClusteringPowerShellFeature
+        {
+            Ensure    = 'Present'
+            Name      = 'RSAT-Clustering-PowerShell'
+            DependsOn = '[WindowsFeature]AddFailoverFeature'
+        }
+
+        WindowsFeature AddRemoteServerAdministrationToolsClusteringCmdInterfaceFeature
+        {
+            Ensure    = 'Present'
+            Name      = 'RSAT-Clustering-CmdInterface'
+            DependsOn = '[WindowsFeature]AddRemoteServerAdministrationToolsClusteringPowerShellFeature'
+        }
+
+        xWaitForCluster WaitForCluster
+        {
+            Name             = 'WSFCluster1'
+            RetryIntervalSec = 10
+            RetryCount       = 60
+            DependsOn        = '[WindowsFeature]AddRemoteServerAdministrationToolsClusteringCmdInterfaceFeature'
+        }
+
+        xCluster JoinSecondNodeToCluster
+        {
+            Name                          = 'WSFCluster1'
+            StaticIPAddress               = '10.0.32.101/19'
+            DomainAdministratorCredential =  $Credentials
+            DependsOn                     = '[xWaitForCluster]WaitForCluster'
+        }
         
     }
 }
 
-
+$ClusterAdminUser = $DomainNetBIOSName + '\' + $DomainAdminUser
 $Password = (Get-SSMParameterValue -Names $SSMParamName -WithDecryption $True).Parameters[0].Value
-$Credentials = (New-Object System.Management.Automation.PSCredential($DomainAdminUser,(ConvertTo-SecureString $Password -AsPlainText -Force)))
+$Credentials = (New-Object System.Management.Automation.PSCredential($ClusterAdminUser,(ConvertTo-SecureString $Password -AsPlainText -Force)))
+
 
 
 $ConfigurationData = @{
@@ -70,32 +108,6 @@ try {
     Start-Transcript -Path C:\cfn\log\$($MyInvocation.MyCommand.Name).log -Append
     
     WSFCNode2Config -OutputPath 'C:\cfn\scripts\WSFCNode2Config' -Credentials $Credentials -ConfigurationData $ConfigurationData
-
-    Start-DscConfiguration 'C:\cfn\scripts\WSFCNode2Config' -Wait -Verbose -Force
-}
-catch {
-    $_ | Write-host "hello"
-}
-
-
-$ConfigurationData = @{
-    AllNodes = @(
-        @{
-            NodeName="*"
-            PSDscAllowPlainTextPassword = $true
-            PSDscAllowDomainUser = $true
-        },
-        @{
-            NodeName = 'localhost'
-        }
-    )
-}
-
-try {
-    
-    Start-Transcript -Path C:\cfn\log\$($MyInvocation.MyCommand.Name).log -Append
-    
-    WSFCNode2Config -OutputPath 'C:\cfn\scripts\WSFCNode2Config' -Credentials $Credentials  -ConfigurationData $ConfigurationData
 
     Start-DscConfiguration 'C:\cfn\scripts\WSFCNode2Config' -Wait -Verbose -Force
 }
