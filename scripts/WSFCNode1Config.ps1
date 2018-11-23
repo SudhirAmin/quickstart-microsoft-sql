@@ -80,7 +80,6 @@ $Password = (Get-SSMParameterValue -Names $SSMParamName -WithDecryption $True).P
 $Credentials = (New-Object System.Management.Automation.PSCredential($ClusterAdminUser,(ConvertTo-SecureString $Password -AsPlainText -Force)))
 
 
-
 $ConfigurationData = @{
     AllNodes = @(
         @{

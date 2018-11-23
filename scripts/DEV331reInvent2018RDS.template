@@ -1,0 +1,229 @@
+{
+    "AWSTemplateFormatVersion": "2010-09-09",
+    "Description": "This template will provision MultiAZ SQL 2017 Enterprise Edition RDS Instance + S3 Bucket + SQL Backup/Restore Options group)",
+    "Metadata": {
+        "AWS::CloudFormation::Interface": {
+            "ParameterGroups": [
+                {
+                    "Label": {
+                        "default": "Create S3 Bucket to store SQL DB Backup files "
+                    },
+                    "Parameters": [
+                        "S3BucketName"
+                    ]
+                },
+                {
+                    "Label": {
+                        "default": "RDS Instance Configuration Details"
+                    },
+                    "Parameters": [
+                        "RDSInstanceName",
+                        "DemoAppDBUserName",
+                        "DemoAppDBPassword"
+                    ]
+                },
+                {
+                    "Label": {
+                        "default": "VPC Configuration Details"
+                    },
+                    "Parameters": [
+                        "VPCID",
+                        "PrivateSubnet1ID",
+                        "PrivateSubnet2ID"
+
+                    ]
+                }
+            ],
+            "ParameterLabels": {
+                "DemoAppDBPassword": {
+                    "default": "RDS Password"
+                },
+                "RDSInstanceName": {
+                    "default": "RDS InstanceName"
+                },
+                "DemoAppDBUserName": {
+                    "default": "RDS UserName"
+                },
+                "PrivateSubnet1ID": {
+                    "default": "Private Subnet 1 ID"
+                },
+                "PrivateSubnet2ID": {
+                    "default": "Private Subnet 2 ID"
+                },
+                "S3BucketName": {
+                    "default": " S3 Bucket Name"
+                },
+                "VPCID": {
+                    "default": "VPC ID"
+                }
+            }
+        }
+    },
+    "Parameters": {
+	    "S3BucketName": {
+            "AllowedPattern": "^[0-9a-zA-Z]+([0-9a-zA-Z-]*[0-9a-zA-Z])*$",
+            "ConstraintDescription": "Quick Start bucket name can include numbers, lowercase letters, uppercase letters, and hyphens (-). It cannot start or end with a hyphen (-).",
+            "Default": "dev331buckets331",
+            "Description": "This will be the S3 Bucket where you will store/upload SQL Backup Files ",
+            "Type": "String"
+        },
+        "RDSInstanceName": {
+            "AllowedPattern": "^[0-9a-zA-Z]+([0-9a-zA-Z-]*[0-9a-zA-Z])*$",
+            "ConstraintDescription": "Quick Start bucket name can include numbers, lowercase letters, uppercase letters, and hyphens (-). It cannot start or end with a hyphen (-).",
+            "Default": "reinvent2018rds",
+            "Description": "Please keep the default name",
+            "Type": "String"
+        },
+        "DemoAppDBPassword": {
+            "AllowedPattern": "[!#$%^&*a-zA-Z0-9].*",
+            "ConstraintDescription": "Minimum of 8 alphanumeric characters and any of the following special characters (!,#,$,%,^,&,*)",
+            "Description": "This will be your password for RDS Instance",
+            "MaxLength": "128",
+            "MinLength": "0",
+            "NoEcho": "true",
+            "Type": "String"
+        },
+        "DemoAppDBUserName": {
+            "AllowedPattern": "[a-zA-Z][a-zA-Z0-9]*",
+            "ConstraintDescription": "must begin with a letter and contain only alphanumeric characters.",
+            "Default": "sa",
+            "Description": "This will be the UserName for RDS Instance access",
+            "MaxLength": "16",
+            "MinLength": "0",
+            "Type": "String"
+        },
+        "PrivateSubnet1ID": {
+            "Description": "ID of the private subnet you want to provision resources to that can only be accessed through a gateway",
+            "Type": "AWS::EC2::Subnet::Id"
+        },
+        "PrivateSubnet2ID": {
+            "Description": "ID of the private subnet you want to provision resources to that can only be accessed through a gateway",
+            "Type": "AWS::EC2::Subnet::Id"
+        },
+        "VPCID": {
+            "Description": "Choose the default VPC (172.31.0.0/16)",
+            "Type": "AWS::EC2::VPC::Id"
+        }
+    },
+    "Resources": {
+        "MyReinventRole": 
+        {
+            "Type": "AWS::IAM::Role",
+            "Properties": 
+            {
+                "AssumeRolePolicyDocument": {
+				"Version" : "2012-10-17",
+               "Statement": [ {
+                  "Effect": "Allow",
+                  "Principal": {
+                     "Service": [ 
+                         "rds.amazonaws.com",
+                         "ec2.amazonaws.com",
+                         "elasticbeanstalk.amazonaws.com",
+                         "s3.amazonaws.com"
+                         ]
+                  },
+                  "Action": [ "sts:AssumeRole" ]
+               } ]
+			   },
+                "ManagedPolicyArns": 
+                [
+                    "arn:aws:iam::aws:policy/AWSElasticBeanstalkFullAccess",
+                    "arn:aws:iam::aws:policy/AmazonS3FullAccess",
+                    "arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess",
+                    "arn:aws:iam::aws:policy/AmazonEC2FullAccess",
+                    "arn:aws:iam::aws:policy/AmazonRDSFullAccess",
+                    "arn:aws:iam::aws:policy/AWSLambdaFullAccess",
+                    "arn:aws:iam::aws:policy/AWSCloudFormationReadOnlyAccess"
+                ],
+
+                "RoleName": "ReinventRole"
+            }
+        },
+        "S3Bucket": {
+            "Type": "AWS::S3::Bucket",
+            "Properties": {
+                "BucketName" : {"Ref":"S3BucketName"}
+				}
+        },
+		"MyDBVPCSecurityGroup": {
+            "Type": "AWS::EC2::SecurityGroup",
+            "Properties": {
+                "VpcId": {
+                    "Ref": "VPCID"
+                },
+                "GroupDescription": "Security group RDS DB Instance",
+                "SecurityGroupIngress": {
+                    "IpProtocol": "tcp",
+                    "FromPort": "1433",
+                    "ToPort": "1433",
+                    "CidrIp": "0.0.0.0/0"
+                }
+            }
+        },
+        "MyDBSubnetGroup": {
+            "Type": "AWS::RDS::DBSubnetGroup",
+            "Properties": {
+                "DBSubnetGroupDescription": "Subnets available for the RDS DB Instance",
+                "SubnetIds": [
+                    {
+                        "Ref": "PrivateSubnet1ID"
+                    },
+                    {
+                        "Ref": "PrivateSubnet2ID"
+                    }
+                ]
+            }
+        },
+
+	"SQLOptionGroup": {
+        "Type": "AWS::RDS::OptionGroup",
+        "Properties": {
+          "EngineName": "sqlserver-ee",
+          "MajorEngineVersion": "14.00",
+          "OptionGroupDescription": "A test option group",
+          "OptionConfigurations":[
+            {
+              "OptionName": "SQLSERVER_BACKUP_RESTORE",
+			  "OptionSettings": [
+          {"Name": "IAM_ROLE_ARN", "Value": {"Fn::GetAtt" : ["MyReinventRole", "Arn"] }}
+        ]
+               
+            }
+          ]
+        }
+      },
+        "MyDB": {
+            "Type": "AWS::RDS::DBInstance",
+            "Properties": {
+                "DBInstanceIdentifier" : {
+                    "Ref": "RDSInstanceName"
+                },
+                "AllocatedStorage": "50",
+                "DBInstanceClass": "db.m4.xlarge",
+                "Engine": "sqlserver-ee",
+                "EngineVersion": "14.00.3035.2.v1",
+                "MultiAZ": "true",
+                "LicenseModel" : "license-included",
+                "PubliclyAccessible": "true",
+                "MasterUsername": {
+                    "Ref": "DemoAppDBUserName"
+                },
+                "MasterUserPassword": {
+                    "Ref": "DemoAppDBPassword"
+                },
+                "DBSubnetGroupName": {
+                    "Ref": "MyDBSubnetGroup"
+                },
+                "OptionGroupName" : {
+                    "Ref": "SQLOptionGroup"
+                },
+                "VPCSecurityGroups": [
+                    {
+                        "Ref": "MyDBVPCSecurityGroup"
+                    }
+                ]
+            }
+        }
+    }
+}
